@@ -1,9 +1,8 @@
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
-const { exec } = require('child_process');
+const Tesseract = require('tesseract.js');
 const fs = require('fs');
-const path = require('path');
 
 const app = express();
 app.use(cors());
@@ -11,7 +10,7 @@ app.use(cors());
 const upload = multer({ dest: 'uploads/' });
 
 app.get('/', (req, res) => {
-  res.send('OCR server locale attivo');
+  res.send('OCR server ONLINE 🚀');
 });
 
 app.post('/ocr', upload.single('file'), async (req, res) => {
@@ -21,47 +20,21 @@ app.post('/ocr', upload.single('file'), async (req, res) => {
     }
 
     const filePath = req.file.path;
-    const ext = path.extname(req.file.originalname).toLowerCase();
- 
-    let images = [];
 
-    if (ext === '.pdf') {
-      const baseName = filePath;
+    const result = await Tesseract.recognize(
+      filePath,
+      'ita',
+      {
+        logger: m => console.log(m)
+      }
+    );
 
-      await new Promise((resolve, reject) => {
-        exec(`pdftoppm "${filePath}" "${baseName}" -png`, (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
+    fs.unlinkSync(filePath);
 
-      const files = fs.readdirSync('./uploads');
-      images = files
-        .filter(
-          (f) =>
-            f.startsWith(path.basename(baseName)) &&
-            f.toLowerCase().endsWith('.png')
-        )
-        .map((f) => `./uploads/${f}`);
-    } else {
-      images = [filePath];
-    }
+    return res.json({
+      text: result.data.text.trim()
+    });
 
-    let fullText = '';
-
-    for (const img of images) {
-      await new Promise((resolve, reject) => {
-        exec(`tesseract "${img}" "${img}_out" -l ita`, (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-
-      const text = fs.readFileSync(`${img}_out.txt`, 'utf8');
-      fullText += text + '\n';
-    }
-
-    return res.json({ text: fullText.trim() });
   } catch (err) {
     console.error(err);
     return res.status(500).json({
@@ -71,6 +44,8 @@ app.post('/ocr', upload.single('file'), async (req, res) => {
   }
 });
 
-app.listen(3000, () => {
-  console.log('Server OCR locale su http://localhost:3000');
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`Server OCR su porta ${PORT}`);
 });
