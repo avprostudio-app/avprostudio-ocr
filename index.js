@@ -24,9 +24,7 @@ app.post('/ocr', upload.single('file'), async (req, res) => {
     const result = await Tesseract.recognize(
       filePath,
       'ita',
-      {
-        logger: m => console.log(m)
-      }
+      { logger: m => console.log(m) }
     );
 
     fs.unlinkSync(filePath);
