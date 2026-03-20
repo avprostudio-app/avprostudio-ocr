@@ -11,8 +11,12 @@ app.use(cors());
 
 const upload = multer({ dest: "uploads/" });
 
+const credentials = JSON.parse(
+  process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON
+);
+
 const client = new vision.ImageAnnotatorClient({
-  keyFilename: "key.json",
+  credentials,
 });
 
 function safeUnlink(filePath) {
