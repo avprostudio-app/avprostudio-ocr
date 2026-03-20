@@ -1,118 +1,76 @@
-const express = require("express");
-const multer = require("multer");
-const vision = require("@google-cloud/vision");
-const cors = require("cors");
-const fs = require("fs");
-const path = require("path");
-const { execFileSync } = require("child_process");
+const express = require('express');
+const multer = require('multer');
+const cors = require('cors');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(cors());
 
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ dest: 'uploads/' });
 
-const credentials = JSON.parse(
-  process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON
-);
-
-const client = new vision.ImageAnnotatorClient({
-  credentials,
+app.get('/', (req, res) => {
+  res.send('OCR server locale attivo');
 });
 
-function safeUnlink(filePath) {
-  try {
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-  } catch (_) {}
-}
-
-function cleanupGeneratedFiles(dir, prefixBaseName) {
-  try {
-    const files = fs.readdirSync(dir);
-    for (const file of files) {
-      if (file.startsWith(prefixBaseName)) {
-        safeUnlink(path.join(dir, file));
-      }
-    }
-  } catch (_) {}
-}
-
-async function ocrImageFile(imagePath) {
-  const [result] = await client.documentTextDetection(imagePath);
-  return result?.fullTextAnnotation?.text || "";
-}
-
-async function ocrPdfFile(pdfPath) {
-  const uploadsDir = path.dirname(pdfPath);
-  const baseName = path.basename(pdfPath, path.extname(pdfPath));
-  const outputPrefix = path.join(uploadsDir, `${baseName}-page`);
-
-  // Converte ogni pagina PDF in PNG
-  execFileSync("pdftoppm", ["-png", pdfPath, outputPrefix]);
-
-  const generatedFiles = fs
-    .readdirSync(uploadsDir)
-    .filter(
-      (file) =>
-        file.startsWith(`${baseName}-page`) && file.toLowerCase().endsWith(".png")
-    )
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-
-  if (!generatedFiles.length) {
-    throw new Error("Nessuna pagina PNG generata dal PDF.");
-  }
-
-  let finalText = "";
-
-  for (const file of generatedFiles) {
-    const pagePath = path.join(uploadsDir, file);
-    const pageText = await ocrImageFile(pagePath);
-    finalText += `${pageText}\n\n`;
-  }
-
-  cleanupGeneratedFiles(uploadsDir, `${baseName}-page`);
-  return finalText.trim();
-}
-
-app.post("/ocr", upload.single("file"), async (req, res) => {
+app.post('/ocr', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: "File mancante" });
+      return res.status(400).json({ error: 'File mancante' });
     }
 
     const filePath = req.file.path;
-    const originalName = req.file.originalname || "";
-    const ext = path.extname(originalName).toLowerCase();
-    const mime = req.file.mimetype || "";
+    const ext = path.extname(req.file.originalname).toLowerCase();
+ 
+    let images = [];
 
-    console.log("Ricevuto file:", originalName);
-    console.log("Mime type:", mime);
-    console.log("Path:", filePath);
+    if (ext === '.pdf') {
+      const baseName = filePath;
 
-    let text = "";
+      await new Promise((resolve, reject) => {
+        exec(`pdftoppm "${filePath}" "${baseName}" -png`, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
 
-    if (mime === "application/pdf" || ext === ".pdf") {
-      text = await ocrPdfFile(filePath);
+      const files = fs.readdirSync('./uploads');
+      images = files
+        .filter(
+          (f) =>
+            f.startsWith(path.basename(baseName)) &&
+            f.toLowerCase().endsWith('.png')
+        )
+        .map((f) => `./uploads/${f}`);
     } else {
-      text = await ocrImageFile(filePath);
+      images = [filePath];
     }
 
-    safeUnlink(filePath);
+    let fullText = '';
 
-    return res.json({ text });
-  } catch (error) {
-    console.error("OCR ERROR COMPLETO:", error);
+    for (const img of images) {
+      await new Promise((resolve, reject) => {
+        exec(`tesseract "${img}" "${img}_out" -l ita`, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
 
-    try {
-      if (req.file?.path) safeUnlink(req.file.path);
-    } catch (_) {}
+      const text = fs.readFileSync(`${img}_out.txt`, 'utf8');
+      fullText += text + '\n';
+    }
 
+    return res.json({ text: fullText.trim() });
+  } catch (err) {
+    console.error(err);
     return res.status(500).json({
-      error: "Errore OCR",
-      details: error.message || String(error),
+      error: 'Errore OCR',
+      details: err.toString(),
     });
   }
 });
 
 app.listen(3000, () => {
-  console.log("🔥 OCR server attivo su http://localhost:3000");
+  console.log('Server OCR locale su http://localhost:3000');
 });
